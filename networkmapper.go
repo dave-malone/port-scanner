@@ -86,9 +86,7 @@ func receivePong(hostNum int, hostChan <-chan host, doneChan chan<- []host) {
 	for i := 0; i < hostNum; i++ {
 		host := <-hostChan
 		if host.alive {
-			if names, err := net.LookupAddr(host.ip.String()); err == nil {
-				host.names = names
-			}
+			host.lookupNames()
 			alives = append(alives, host)
 		}
 	}

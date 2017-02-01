@@ -59,6 +59,7 @@ func (ps *portscanner) scan(concurrency, start, end int) (ports []*port) {
 	fmt.Printf("scanning ports %d-%d on %s...\n", start, end, ps.host)
 
 	sem := make(chan int, concurrency)
+	portChan := make(chan *port)
 
 	for portNum := start; portNum <= end; portNum++ {
 		p := &port{
@@ -67,13 +68,24 @@ func (ps *portscanner) scan(concurrency, start, end int) (ports []*port) {
 			open:   false,
 		}
 
-		ports = append(ports, p)
+		//ports = append(ports, p)
 
 		sem <- 1
 		go func() {
 			ps.test(p)
+
+			if p.open {
+				portChan <- p
+			}
+
 			<-sem
 		}()
+	}
+
+	for p := range portChan {
+		if p.open {
+			ports = append(ports, p)
+		}
 	}
 
 	return ports

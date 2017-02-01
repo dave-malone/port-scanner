@@ -17,9 +17,9 @@ var (
 func main() {
 	flag.Parse()
 	// bytetest()
-	//nmap()
+	//scanAndReportOpenPorts(*newHost(*hostname))
+	nmap()
 
-	scanAndReportOpenPorts(*newHost(*hostname))
 }
 
 func bytetest() {
@@ -54,8 +54,8 @@ func scanAndReportOpenPorts(host host) {
 			fmt.Printf("%d [%s]\n", p.number, p.state())
 		}
 	}
-	fmt.Println()
 	fmt.Printf("Scan execution time: %s\n", elapsed)
+	fmt.Println()
 }
 
 func portscan(host string) []*port {
