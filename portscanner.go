@@ -16,13 +16,18 @@ type port struct {
 	host   string
 	number int
 	open   bool
+	err    error
 }
 
 func (p *port) address() string {
 	return fmt.Sprintf("%s:%d", p.host, p.number)
 }
 
-func (p *port) portState() string {
+func (p *port) state() string {
+	if p.err != nil {
+		return "err"
+	}
+
 	if p.open {
 		return "open"
 	}
@@ -30,84 +35,46 @@ func (p *port) portState() string {
 	return "closed"
 }
 
-func (p *port) test(timeout time.Duration) error {
-	conn, err := net.DialTimeout("tcp", p.address(), timeout)
+func (ps *portscanner) test(p *port) {
+	conn, err := net.DialTimeout("tcp", p.address(), ps.timeout)
 	if conn != nil {
 		defer conn.Close()
 	}
 
 	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "i/o timeout") != true && strings.Contains(errMsg, "connection refused") != true {
-			fmt.Printf("error resolving tcp4 address for %s: %v\n", p.address(), err)
-		}
-
 		p.open = false
-		return nil
+		if strings.Contains(err.Error(), "i/o timeout") != true && strings.Contains(err.Error(), "connection refused") != true {
+			p.err = fmt.Errorf("error resolving tcp address for %s: %v\n", p.address(), err)
+		}
+	} else {
+		p.open = true
 	}
-
-	p.open = true
-	return nil
 }
 
 func newPortScanner(host string, timeout time.Duration) *portscanner {
 	return &portscanner{host, timeout}
 }
 
-func (ps *portscanner) Scan(start int, end int) {
-	fmt.Printf("scanning ports %d-%d...\n", start, end)
+func (ps *portscanner) scan(concurrency, start, end int) (ports []*port) {
+	fmt.Printf("scanning ports %d-%d on %s...\n", start, end, ps.host)
+
+	sem := make(chan int, concurrency)
 
 	for portNum := start; portNum <= end; portNum++ {
-		p := port{
+		p := &port{
 			host:   ps.host,
 			number: portNum,
 			open:   false,
 		}
 
-		if err := p.test(ps.timeout); err != nil {
-			fmt.Printf("%s [Failed to test port: %v]\n", p.address(), err)
-			return
-		}
+		ports = append(ports, p)
 
-		if p.open {
-			fmt.Printf("%s [%s]\n", p.address(), p.portState())
-		}
-	}
-}
-
-//running the scan async does not seem to produce reliable results
-func (ps *portscanner) ScanAsync(maxConns, start, end int) {
-	fmt.Printf("[async] scanning ports %d-%d...\n", start, end)
-
-	//var wg sync.WaitGroup
-
-	concurrency := maxConns
-	sem := make(chan bool, concurrency)
-
-	for portNum := start; portNum <= end; portNum++ {
-		p := port{
-			host:   ps.host,
-			number: portNum,
-			open:   false,
-		}
-
-		sem <- true
-
-		go func(p port) {
-			defer func() { <-sem }()
-
-			if err := p.test(ps.timeout); err != nil {
-				fmt.Printf("%s [Failed to test port: %v]\n", p.address(), err)
-				return
-			}
-
-			if p.open {
-				fmt.Printf("%s [%s]\n", p.address(), p.portState())
-			}
-		}(p)
+		sem <- 1
+		go func() {
+			ps.test(p)
+			<-sem
+		}()
 	}
 
-	for i := 0; i < cap(sem); i++ {
-		sem <- true
-	}
+	return ports
 }

@@ -6,13 +6,42 @@ import (
 	"os/exec"
 )
 
-type pong struct {
-	ip    net.IP
-	alive bool
+type host struct {
+	ip        net.IP
+	alive     bool
+	names     []string
+	openPorts []port
 }
 
-func mapnetwork(cidr string) ([]net.IP, error) {
-	ipnet, ips, err := getallips(cidr)
+func (h *host) lookupNames() error {
+	names, err := net.LookupAddr(h.ip.String())
+	h.names = names
+	return err
+}
+
+func newHost(hostname string) *host {
+	ip := net.ParseIP(hostname)
+	if ip == nil {
+		tcpAddr, err := net.ResolveTCPAddr("tcp4", fmt.Sprintf("%s:%d", hostname, 80))
+		if err == nil && tcpAddr != nil {
+			ip = tcpAddr.IP
+		}
+	}
+
+	if ip == nil {
+		panic("Failed to initialize new host by hostname " + hostname)
+	}
+
+	host := &host{
+		ip: ip,
+	}
+	host.lookupNames()
+
+	return host
+}
+
+func mapNetwork(cidr string) ([]host, error) {
+	ipnet, ips, err := listIPsInCIDR(cidr)
 	if err != nil {
 		return nil, err
 	}
@@ -21,18 +50,17 @@ func mapnetwork(cidr string) ([]net.IP, error) {
 
 	concurrentMax := 100
 	pingChan := make(chan net.IP, concurrentMax)
-	pongChan := make(chan pong, len(ips))
-	doneChan := make(chan []net.IP)
+	hostChan := make(chan host, len(ips))
+	doneChan := make(chan []host)
 
 	for i := 0; i < concurrentMax; i++ {
-		go ping(pingChan, pongChan)
+		go ping(pingChan, hostChan)
 	}
 
-	go receivePong(len(ips), pongChan, doneChan)
+	go receivePong(len(ips), hostChan, doneChan)
 
 	for _, ip := range ips {
 		pingChan <- ip
-		//  fmt.Println("sent: " + ip)
 	}
 
 	alives := <-doneChan
@@ -40,7 +68,7 @@ func mapnetwork(cidr string) ([]net.IP, error) {
 	return alives, nil
 }
 
-func ping(pingChan <-chan net.IP, pongChan chan<- pong) {
+func ping(pingChan <-chan net.IP, hostChan chan<- host) {
 	for ip := range pingChan {
 		_, err := exec.Command("ping", "-c1", "-t1", ip.String()).Output()
 		var alive bool
@@ -49,23 +77,25 @@ func ping(pingChan <-chan net.IP, pongChan chan<- pong) {
 		} else {
 			alive = true
 		}
-		pongChan <- pong{ip: ip, alive: alive}
+		hostChan <- host{ip: ip, alive: alive}
 	}
 }
 
-func receivePong(pongNum int, pongChan <-chan pong, doneChan chan<- []net.IP) {
-	var alives []net.IP
-	for i := 0; i < pongNum; i++ {
-		pong := <-pongChan
-		//  fmt.Println("received:", pong)
-		if pong.alive {
-			alives = append(alives, pong.ip)
+func receivePong(hostNum int, hostChan <-chan host, doneChan chan<- []host) {
+	var alives []host
+	for i := 0; i < hostNum; i++ {
+		host := <-hostChan
+		if host.alive {
+			if names, err := net.LookupAddr(host.ip.String()); err == nil {
+				host.names = names
+			}
+			alives = append(alives, host)
 		}
 	}
 	doneChan <- alives
 }
 
-func getallips(cidr string) (*net.IPNet, []net.IP, error) {
+func listIPsInCIDR(cidr string) (*net.IPNet, []net.IP, error) {
 	baseip, ipnet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to parse cidr %s; %v", cidr, err)
