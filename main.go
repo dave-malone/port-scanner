@@ -17,8 +17,8 @@ var (
 func main() {
 	flag.Parse()
 	// bytetest()
-	//scanAndReportOpenPorts(*newHost(*hostname))
-	nmap()
+	scanAndReportOpenPorts(*newHost(*hostname))
+	//nmap()
 
 }
 
