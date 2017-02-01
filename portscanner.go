@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -80,7 +79,7 @@ func (ps *portscanner) Scan(start int, end int) {
 func (ps *portscanner) ScanAsync(maxConns, start, end int) {
 	fmt.Printf("[async] scanning ports %d-%d...\n", start, end)
 
-	var wg sync.WaitGroup
+	//var wg sync.WaitGroup
 
 	concurrency := maxConns
 	sem := make(chan bool, concurrency)
@@ -92,13 +91,10 @@ func (ps *portscanner) ScanAsync(maxConns, start, end int) {
 			open:   false,
 		}
 
-		wg.Add(1)
 		sem <- true
 
 		go func(p port) {
 			defer func() { <-sem }()
-			// Decrement the counter when the goroutine completes.
-			defer wg.Done()
 
 			if err := p.test(ps.timeout); err != nil {
 				fmt.Printf("%s [Failed to test port: %v]\n", p.address(), err)
@@ -114,6 +110,4 @@ func (ps *portscanner) ScanAsync(maxConns, start, end int) {
 	for i := 0; i < cap(sem); i++ {
 		sem <- true
 	}
-
-	wg.Wait()
 }
