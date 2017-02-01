@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -58,8 +59,9 @@ func newPortScanner(host string, timeout time.Duration) *portscanner {
 func (ps *portscanner) scan(concurrency, start, end int) (ports []*port) {
 	fmt.Printf("scanning ports %d-%d on %s...\n", start, end, ps.host)
 
+	var wg sync.WaitGroup
 	sem := make(chan int, concurrency)
-	portChan := make(chan *port)
+	openPortsChan := make(chan *port)
 
 	for portNum := start; portNum <= end; portNum++ {
 		p := &port{
@@ -69,23 +71,30 @@ func (ps *portscanner) scan(concurrency, start, end int) (ports []*port) {
 		}
 
 		//ports = append(ports, p)
+		wg.Add(1)
+		go func(p *port) {
+			sem <- 1
 
-		sem <- 1
-		go func() {
-			ps.test(p)
+			go func(p *port) {
+				defer wg.Done()
 
-			if p.open {
-				portChan <- p
-			}
-
-			<-sem
-		}()
+				ps.test(p)
+				if p.open {
+					openPortsChan <- p
+				}
+				<-sem
+			}(p)
+		}(p)
 	}
 
-	for p := range portChan {
-		if p.open {
-			ports = append(ports, p)
-		}
+	//closes channel
+	go func() {
+		wg.Wait()
+		close(openPortsChan)
+	}()
+
+	for p := range openPortsChan {
+		ports = append(ports, p)
 	}
 
 	return ports
